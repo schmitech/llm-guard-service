@@ -1,6 +1,7 @@
 import time
 import hashlib
 import json
+import logging
 from typing import List, Dict, Any, Optional, Tuple
 from llm_guard.input_scanners import (
     Anonymize, BanSubstrings, BanTopics, Code,
@@ -13,9 +14,19 @@ from llm_guard.output_scanners import (
 from app.config.settings import settings
 from app.models.request_models import ContentType, SecurityCheckResponse
 from app.services.cache_service import CacheService
-import logging
 
 logger = logging.getLogger(__name__)
+
+# Suppress presidio-analyzer warnings about unsupported languages
+class PresidioWarningFilter(logging.Filter):
+    def filter(self, record):
+        return not (
+            record.levelname == 'WARNING' and 
+            'Recognizer not added to registry because language is not supported' in record.getMessage()
+        )
+
+presidio_logger = logging.getLogger("presidio-analyzer")
+presidio_logger.addFilter(PresidioWarningFilter())
 
 class LLMGuardService:
     def __init__(self):
