@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
+from typing import Optional
 import logging
 from app.config.settings import settings
 from app.services.guard_service import LLMGuardService
@@ -31,7 +32,8 @@ async def lifespan(app: FastAPI):
     
     if settings.enable_caching:
         cache_service = guard_service.cache_service
-        await cache_service.connect()
+        if cache_service:
+            await cache_service.connect()
     
     logger.info("LLM Guard Service started successfully")
     
@@ -59,6 +61,8 @@ app.include_router(metrics.router, prefix="/v1/metrics", tags=["metrics"])
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
+    if not guard_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
     return HealthResponse(
         status="healthy",
         version=settings.service_version,
@@ -71,12 +75,14 @@ async def check_security(request: SecurityCheckRequest):
     """
     Perform comprehensive security check on content
     """
+    if not guard_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
     try:
         result = await guard_service.check_content(
             content=request.content,
             content_type=request.content_type,
             scanners=request.scanners,
-            risk_threshold=request.risk_threshold,
+            risk_threshold=request.risk_threshold or 0.5,
             user_id=request.user_id,
             metadata=request.metadata
         )
@@ -90,6 +96,8 @@ async def sanitize_content(request: SanitizeRequest):
     """
     Sanitize content while preserving functionality
     """
+    if not guard_service:
+        raise HTTPException(status_code=503, detail="Service not initialized")
     try:
         # Use anonymize scanner for sanitization
         anonymizer = guard_service.input_scanners.get("anonymize")

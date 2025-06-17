@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     
     class Config:
-        env_file = ".env"
+        env_file = ".env.local"  # Changed to use .env.local
+        env_file_encoding = "utf-8"
 
 settings = Settings()

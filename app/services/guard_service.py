@@ -6,6 +6,7 @@ from llm_guard.input_scanners import (
     Anonymize, BanSubstrings, BanTopics, Code,
     PromptInjection, Secrets, Toxicity
 )
+from llm_guard.vault import Vault
 from llm_guard.output_scanners import (
     Bias, NoRefusal, Relevance, Sensitive
 )
@@ -27,7 +28,7 @@ class LLMGuardService:
         """Initialize all configured scanners"""
         # Input scanners
         if "anonymize" in settings.enabled_input_scanners:
-            self.input_scanners["anonymize"] = Anonymize()
+            self.input_scanners["anonymize"] = Anonymize(vault=Vault())
             
         if "ban_substrings" in settings.enabled_input_scanners:
             self.input_scanners["ban_substrings"] = BanSubstrings(
@@ -41,7 +42,7 @@ class LLMGuardService:
             )
             
         if "code" in settings.enabled_input_scanners:
-            self.input_scanners["code"] = Code(languages=["python", "javascript"])
+            self.input_scanners["code"] = Code(languages=["Python", "JavaScript"])
             
         if "prompt_injection" in settings.enabled_input_scanners:
             self.input_scanners["prompt_injection"] = PromptInjection()
