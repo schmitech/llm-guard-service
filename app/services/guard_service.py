@@ -38,7 +38,8 @@ class LLMGuardService:
             
         if "ban_topics" in settings.enabled_input_scanners:
             self.input_scanners["ban_topics"] = BanTopics(
-                topics=["violence", "illegal", "hate"]
+                topics=["violence", "illegal", "hate"],
+                threshold=0.8  # Set higher threshold to reduce false positives
             )
             
         if "code" in settings.enabled_input_scanners:
