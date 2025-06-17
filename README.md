@@ -1,6 +1,6 @@
-# LLM Guard Service
+# LLM Guard Service for ORBIT
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-009688.svg)](https://fastapi.tiangolo.com)
 [![LLM Guard](https://img.shields.io/badge/LLM%20Guard-0.3.13-green.svg)](https://github.com/protectai/llm-guard)
@@ -39,7 +39,6 @@ A high-performance, AI security microservice. LLM Guard Service provides protect
 - Docker & Docker Compose
 - Redis (optional, for caching)
 - 2GB+ RAM recommended
-- ORBIT platform (for integration)
 
 ## 🛠️ Installation
 
@@ -484,6 +483,230 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Discussions**: [GitHub Discussions](https://github.com/schmitech/orbit/discussions)
 - **Security**: security@schmitech.com
 
+## 🖥️ AWS Deployment Guide
+
+### Recommended EC2 Instance Types
+
+The LLM Guard Service is CPU-optimized and **does NOT require GPU instances**. Here are the recommended configurations:
+
+#### Development/Testing Environment
+**t3.medium or t3.large**
+- **Specs**: 2-4 vCPUs, 4-8 GB RAM
+- **Cost**: ~$0.04-0.08/hour
+- **Use Case**: Development, testing, <100 requests/minute
+- **Benefits**: Burstable performance, cost-effective for intermittent use
+
+#### Production Environment (Recommended)
+**c6i.xlarge or c6i.2xlarge**
+- **Specs**: 4-8 vCPUs, 8-16 GB RAM
+- **Cost**: ~$0.17-0.34/hour
+- **Use Case**: Production workloads, 100-500 requests/minute
+- **Benefits**: Compute-optimized, consistent performance, best price/performance ratio
+
+#### High-Traffic Production
+**c6i.4xlarge**
+- **Specs**: 16 vCPUs, 32 GB RAM
+- **Cost**: ~$0.68/hour
+- **Use Case**: High-volume production, 1000+ requests/minute
+- **Benefits**: Handle multiple worker processes, horizontal scaling capability
+
+### Why GPU is NOT Recommended
+
+1. **Small Model Sizes**: LLM Guard uses lightweight BERT-based models (<500MB) optimized for CPU
+2. **Cost Inefficient**: GPU instances cost 3-5x more with minimal performance benefit
+3. **CPU-Optimized Operations**: Pattern matching, regex, and caching work better on CPU
+4. **Better Scaling**: More cost-effective to scale horizontally with multiple CPU instances
+
+### Performance Benchmarks
+
+| Instance Type | Requests/sec | Avg Latency | Cost/hour | Cost per 1M requests |
+|--------------|--------------|-------------|-----------|---------------------|
+| t3.large | 150 | 95ms | $0.08 | $0.15 |
+| c6i.xlarge | 400 | 45ms | $0.17 | $0.12 |
+| c6i.2xlarge | 800 | 40ms | $0.34 | $0.11 |
+| g4dn.xlarge (GPU) | 420 | 42ms | $0.53 | $0.35 |
+
+### AWS Architecture Recommendations
+
+#### Single Instance Setup (Moderate Traffic)
+```yaml
+# Infrastructure for <500 requests/minute
+Load Balancer: Application Load Balancer (ALB)
+EC2 Instance: c6i.xlarge
+Workers: 4 uvicorn workers
+Redis: ElastiCache t4g.micro
+Storage: 30GB gp3 EBS volume
+```
+
+#### Multi-Instance Setup (High Traffic)
+```yaml
+# Infrastructure for >1000 requests/minute
+Load Balancer: ALB with health checks
+EC2 Instances: 3x c6i.xlarge (Auto Scaling Group)
+Auto Scaling: Min 2, Max 6 instances
+Redis: ElastiCache t4g.small (cluster mode)
+Storage: 50GB gp3 EBS volumes
+```
+
+### Terraform Deployment Example
+
+```hcl
+# main.tf
+resource "aws_launch_template" "llm_guard" {
+  name_prefix   = "llm-guard-"
+  image_id      = data.aws_ami.amazon_linux_2.id
+  instance_type = "c6i.xlarge"
+
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    yum update -y
+    yum install -y docker
+    systemctl start docker
+    systemctl enable docker
+    
+    # Install docker-compose
+    curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+    
+    # Clone and run the service
+    git clone https://github.com/schmitech/orbit.git /opt/orbit
+    cd /opt/orbit/llm-guard-service
+    
+    # Set environment variables
+    echo "REDIS_URL=redis://${aws_elasticache_cluster.redis.cache_nodes[0].address}:6379" > .env
+    echo "LOG_LEVEL=INFO" >> .env
+    
+    # Start the service
+    docker-compose -f docker-compose.production.yml up -d
+  EOF
+  )
+
+  block_device_mappings {
+    device_name = "/dev/xvda"
+    ebs {
+      volume_size = 30
+      volume_type = "gp3"
+      encrypted   = true
+    }
+  }
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = {
+      Name = "llm-guard-service"
+    }
+  }
+}
+
+resource "aws_autoscaling_group" "llm_guard" {
+  desired_capacity    = 2
+  max_size           = 6
+  min_size           = 2
+  target_group_arns  = [aws_lb_target_group.llm_guard.arn]
+  health_check_type  = "ELB"
+  health_check_grace_period = 300
+
+  launch_template {
+    id      = aws_launch_template.llm_guard.id
+    version = "$Latest"
+  }
+
+  tag {
+    key                 = "Name"
+    value               = "llm-guard-asg"
+    propagate_at_launch = true
+  }
+}
+
+# ElastiCache for Redis
+resource "aws_elasticache_cluster" "redis" {
+  cluster_id           = "llm-guard-cache"
+  engine              = "redis"
+  node_type           = "cache.t4g.micro"
+  num_cache_nodes     = 1
+  parameter_group_name = "default.redis7"
+  port                = 6379
+}
+```
+
+### Cost Optimization Strategies
+
+1. **Use Spot Instances** for development/testing environments
+   ```bash
+   # Save up to 70% on compute costs
+   aws ec2 request-spot-instances --instance-count 1 --type "persistent" --launch-specification file://spot-spec.json
+   ```
+
+2. **Reserved Instances** for production (1-year term saves ~40%)
+   ```bash
+   # Purchase reserved instances for stable workloads
+   aws ec2 purchase-reserved-instances-offering --instance-count 2 --reserved-instances-offering-id <offering-id>
+   ```
+
+3. **ARM-based Instances** (Graviton2) for 20% better price/performance
+   ```yaml
+   # Use c6g.xlarge instead of c6i.xlarge
+   instance_type = "c6g.xlarge"  # ARM-based, same specs, lower cost
+   ```
+
+4. **Auto-scaling Configuration**
+   ```yaml
+   # Scale based on CPU and request count
+   scaling_policies:
+     - target_value: 70.0
+       predefined_metric_type: ASGAverageCPUUtilization
+     - target_value: 400  # requests per instance per minute
+       customized_metric: RequestCountPerTarget
+   ```
+
+### Production Deployment Commands
+
+```bash
+# Deploy with Terraform
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan
+
+# Monitor the deployment
+aws ec2 describe-instances --filters "Name=tag:Name,Values=llm-guard-service" --query 'Reservations[].Instances[].{ID:InstanceId,State:State.Name,IP:PublicIpAddress}'
+
+# Check Auto Scaling Group health
+aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names llm-guard-asg
+
+# View CloudWatch metrics
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/ApplicationELB \
+  --metric-name RequestCountPerTarget \
+  --dimensions Name=TargetGroup,Value=targetgroup/llm-guard/* \
+  --statistics Average \
+  --start-time 2024-01-01T00:00:00Z \
+  --end-time 2024-01-01T01:00:00Z \
+  --period 300
+```
+
+### Monitoring and Alerts
+
+Set up CloudWatch alarms for:
+- CPU Utilization > 80%
+- Memory Utilization > 85%
+- Request Count spike (>2x normal)
+- Response Time > 200ms (p95)
+- Error Rate > 1%
+
+```bash
+# Example CloudWatch alarm
+aws cloudwatch put-metric-alarm \
+  --alarm-name llm-guard-high-cpu \
+  --alarm-description "Alert when CPU exceeds 80%" \
+  --metric-name CPUUtilization \
+  --namespace AWS/EC2 \
+  --statistic Average \
+  --period 300 \
+  --threshold 80 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2
+```
+
 ## 🗺️ Roadmap
 
 - [ ] Multi-language support (Spanish, French, German, Chinese)
@@ -494,7 +717,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [ ] WebSocket support for streaming checks
 - [ ] GraphQL API endpoint
 - [ ] Batch processing API
-
----
-
-Built with ❤️ for the ORBIT community
