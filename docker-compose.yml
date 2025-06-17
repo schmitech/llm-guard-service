@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  llm-guard:
+    build: .
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      - redis
+    networks:
+      - orbit-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - orbit-network
+
+networks:
+  orbit-network:
+    driver: bridge
