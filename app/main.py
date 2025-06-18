@@ -136,3 +136,57 @@ async def sanitize_content(request: SanitizeRequest):
     except Exception as e:
         logger.error(f"Sanitization failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/v1/admin/cache/clear")
+async def clear_cache():
+    """
+    Clear all cached security results (admin endpoint)
+    """
+    if not cache_service:
+        raise HTTPException(status_code=503, detail="Cache service not available")
+    try:
+        # Clear all security-related cache keys
+        if cache_service.redis_client:
+            keys = await cache_service.redis_client.keys("security:*")
+            if keys:
+                await cache_service.redis_client.delete(*keys)
+                cleared_count = len(keys)
+            else:
+                cleared_count = 0
+            
+            return {
+                "status": "success",
+                "message": f"Cleared {cleared_count} cached entries",
+                "cleared_count": cleared_count
+            }
+        else:
+            raise HTTPException(status_code=503, detail="Cache not connected")
+    except Exception as e:
+        logger.error(f"Cache clear failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/admin/cache/status")
+async def cache_status():
+    """
+    Get cache statistics and status
+    """
+    if not cache_service:
+        raise HTTPException(status_code=503, detail="Cache service not available")
+    try:
+        if cache_service.redis_client:
+            # Get cache statistics
+            info = await cache_service.redis_client.info()
+            keys = await cache_service.redis_client.keys("security:*")
+            
+            return {
+                "connected": cache_service.connected,
+                "security_cache_entries": len(keys),
+                "total_keys": info.get("db0", {}).get("keys", 0) if "db0" in info else 0,
+                "memory_used": info.get("used_memory_human", "unknown"),
+                "cache_ttl": settings.cache_ttl
+            }
+        else:
+            return {"connected": False, "error": "Cache not connected"}
+    except Exception as e:
+        logger.error(f"Cache status check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

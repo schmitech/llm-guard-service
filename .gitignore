@@ -198,3 +198,4 @@ cython_debug/
 
 # Generated configuration files
 presidio_config.json
+*.pid

@@ -2,7 +2,7 @@ logging:
   version: 1
   formatters:
     default:
-      format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+      format: '%(asctime)s [%(levelname)s]: %(message)s'
   handlers:
     file:
       class: logging.handlers.TimedRotatingFileHandler
@@ -28,6 +28,7 @@ logging:
       handlers: [file, console]
       propagate: 0
     uvicorn.error:
+      # This logger is used by Uvicorn for server events (not actual errors)
       level: INFO
       handlers: [file, console]
       propagate: 0
@@ -35,12 +36,75 @@ logging:
       level: WARNING
       handlers: [file, console]
       propagate: 0
+    app.services.guard_service:
+      level: INFO
+      handlers: [file, console]
+      propagate: 0
 
 # LLM Guard Service Configuration
 llm_guard_service:
   # Set to true to enable verbose model initialization logging
   verbose_initialization: true
-
+  
+  # Cache configuration
+  cache:
+    # TTL for different result types (in seconds)
+    safe_result_ttl: 1800      # 30 minutes for safe results
+    unsafe_result_ttl: 0       # Don't cache unsafe results (0 = disabled)
+    
+    # Cache behavior controls
+    cache_only_safe: true       # Only cache safe results (recommended)
+    auto_invalidate: true       # Auto-invalidate on config changes
+    
+    # Cache size limits
+    max_cache_size: 10000      # Maximum number of cached entries
+    
+  # Security scanner configurations
+  security_scanners:
+    ban_substrings:
+      enabled: true
+      case_sensitive: false
+      substrings:
+        - "password"
+        - "api_key" 
+        - "secret"
+        - "token"
+        - "hack"
+        - "hacking"
+        - "exploit"
+        - "vulnerability"
+        - "malware"
+        - "breach"
+        - "crack"
+        - "bypass"
+        - "penetrate"
+        - "intrude"
+    
+    ban_topics:
+      enabled: true
+      threshold: 0.6  # Lower values catch more potential threats
+      topics:
+        - "violence"
+        - "illegal"
+        - "hate"
+        - "hacking"
+        - "cybercrime"
+        - "malware"
+        - "fraud"
+        - "phishing"
+        - "social engineering"
+        - "unauthorized access"
+        - "data breach"
+        - "computer intrusion"
+    
+    toxicity:
+      enabled: true
+      threshold: 0.7  # Threshold for toxicity detection
+      
+    prompt_injection:
+      enabled: true
+      threshold: 0.8  # Threshold for prompt injection detection
+    
 # Presidio Analyzer Configuration
 presidio:
   # Map model outputs to Presidio entity types

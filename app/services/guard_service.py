@@ -101,17 +101,35 @@ class LLMGuardService:
                 self.input_scanners["anonymize"] = Anonymize(vault=Vault())
             
         if "ban_substrings" in settings.enabled_input_scanners:
+            # Get configuration from settings
+            ban_substrings_config = settings.llm_guard_service_config.get('security_scanners', {}).get('ban_substrings', {})
+            substrings = ban_substrings_config.get('substrings', [
+                "password", "api_key", "secret", "token", 
+                "hack", "hacking", "exploit", "vulnerability", "malware",
+                "breach", "crack", "bypass", "penetrate", "intrude"
+            ])
+            case_sensitive = ban_substrings_config.get('case_sensitive', False)
+            
             with self._suppress_debug_output():
                 self.input_scanners["ban_substrings"] = BanSubstrings(
-                    substrings=["password", "api_key", "secret", "token"],
-                    case_sensitive=False
+                    substrings=substrings,
+                    case_sensitive=case_sensitive
                 )
                 
         if "ban_topics" in settings.enabled_input_scanners:
             with self._suppress_debug_output():
+                # Get configuration from settings
+                ban_topics_config = settings.llm_guard_service_config.get('security_scanners', {}).get('ban_topics', {})
+                topics = ban_topics_config.get('topics', [
+                    "violence", "illegal", "hate", "hacking", "cybercrime", 
+                    "malware", "fraud", "phishing", "social engineering",
+                    "unauthorized access", "data breach", "computer intrusion"
+                ])
+                threshold = ban_topics_config.get('threshold', 0.6)
+                
                 self.input_scanners["ban_topics"] = BanTopics(
-                    topics=["violence", "illegal", "hate"],
-                    threshold=0.8  # Set higher threshold to reduce false positives
+                    topics=topics,
+                    threshold=threshold
                 )
                 
         if "code" in settings.enabled_input_scanners:
@@ -120,7 +138,14 @@ class LLMGuardService:
                 
         if "prompt_injection" in settings.enabled_input_scanners:
             with self._suppress_debug_output():
-                self.input_scanners["prompt_injection"] = PromptInjection()
+                # Get configuration from settings
+                prompt_injection_config = settings.llm_guard_service_config.get('security_scanners', {}).get('prompt_injection', {})
+                threshold = prompt_injection_config.get('threshold', 0.8)
+                
+                if threshold < 1.0:
+                    self.input_scanners["prompt_injection"] = PromptInjection(threshold=threshold)
+                else:
+                    self.input_scanners["prompt_injection"] = PromptInjection()
                 
         if "secrets" in settings.enabled_input_scanners:
             with self._suppress_debug_output():
@@ -128,7 +153,14 @@ class LLMGuardService:
                 
         if "toxicity" in settings.enabled_input_scanners:
             with self._suppress_debug_output():
-                self.input_scanners["toxicity"] = Toxicity()
+                # Get configuration from settings
+                toxicity_config = settings.llm_guard_service_config.get('security_scanners', {}).get('toxicity', {})
+                threshold = toxicity_config.get('threshold', 0.7)
+                
+                if threshold < 1.0:
+                    self.input_scanners["toxicity"] = Toxicity(threshold=threshold)
+                else:
+                    self.input_scanners["toxicity"] = Toxicity()
         
         # Output scanners
         if "bias" in settings.enabled_output_scanners:
@@ -217,13 +249,27 @@ class LLMGuardService:
             processing_time_ms=processing_time_ms
         )
         
-        # Cache result
-        if self.cache_service and is_safe:
-            await self.cache_service.set(
-                cache_key, 
-                response.model_dump_json(),
-                ttl=settings.cache_ttl
-            )
+        # Cache result with dynamic TTL based on result and configuration
+        cache_config = settings.llm_guard_service_config.get('cache', {})
+        should_cache = False
+        cache_ttl = settings.cache_ttl  # Default fallback
+        
+        if self.cache_service:
+            if is_safe and cache_config.get('cache_only_safe', True):
+                # Cache safe results with configurable TTL
+                cache_ttl = cache_config.get('safe_result_ttl', settings.cache_ttl)
+                should_cache = cache_ttl > 0
+            elif not is_safe and not cache_config.get('cache_only_safe', True):
+                # Cache unsafe results only if explicitly enabled
+                cache_ttl = cache_config.get('unsafe_result_ttl', 0)
+                should_cache = cache_ttl > 0
+            
+            if should_cache:
+                await self.cache_service.set(
+                    cache_key, 
+                    response.model_dump_json(),
+                    ttl=cache_ttl
+                )
         
         # Log security event
         logger.info(
@@ -272,14 +318,34 @@ class LLMGuardService:
         content_type: ContentType,
         scanners: Optional[List[str]]
     ) -> str:
-        """Generate cache key for content"""
+        """Generate cache key for content with configuration versioning"""
+        # Include scanner configuration in cache key for auto-invalidation
+        scanner_config_hash = self._get_scanner_config_hash()
+        
         key_parts = [
             content,
             content_type.value,
-            ",".join(sorted(scanners)) if scanners else "all"
+            ",".join(sorted(scanners)) if scanners else "all",
+            scanner_config_hash  # This makes cache invalid when config changes
         ]
         key_string = "|".join(key_parts)
         return f"security:{hashlib.sha256(key_string.encode()).hexdigest()}"
+    
+    def _get_scanner_config_hash(self) -> str:
+        """Generate hash of current scanner configuration for cache versioning"""
+        import json
+        
+        # Get all relevant configuration that affects scanning
+        config_data = {
+            "enabled_input_scanners": settings.enabled_input_scanners,
+            "enabled_output_scanners": settings.enabled_output_scanners,
+            "default_risk_threshold": settings.default_risk_threshold,
+            "scanner_configs": settings.llm_guard_service_config.get('security_scanners', {})
+        }
+        
+        # Create a deterministic hash of the configuration
+        config_json = json.dumps(config_data, sort_keys=True)
+        return hashlib.sha256(config_json.encode()).hexdigest()[:8]  # Use first 8 chars
     
     def _generate_recommendations(
         self, 
@@ -300,5 +366,11 @@ class LLMGuardService:
             
         if "code" in flagged_scanners:
             recommendations.append("Code detected in input. Ensure code execution is intended.")
+            
+        if "ban_substrings" in flagged_scanners:
+            recommendations.append("Banned keywords or phrases detected. Please modify your request to avoid prohibited terms.")
+            
+        if "ban_topics" in flagged_scanners:
+            recommendations.append("Content relates to prohibited topics. Please ensure your request is for legitimate purposes only.")
             
         return recommendations
