@@ -257,9 +257,10 @@ class LLMGuardService:
         
         for scanner_name, scanner in active_scanners.items():
             try:
-                # Pass original_prompt for relevance scanner in output scanning
-                if scanner_name == "relevance" and content_type == ContentType.OUTPUT and original_prompt:
-                    result = self._run_scanner_with_prompt(scanner, sanitized_content, original_prompt)
+                # All output scanners require the original prompt for comparison
+                if content_type == ContentType.OUTPUT:
+                    # Pass original_prompt even if None - output scanners need two arguments
+                    result = self._run_scanner_with_prompt(scanner, sanitized_content, original_prompt or "")
                 else:
                     result = self._run_scanner(scanner, sanitized_content)
                 
@@ -363,9 +364,9 @@ class LLMGuardService:
             if hasattr(scanner, 'scan'):
                 prompt, is_valid, risk_score = scanner.scan(content)
                 return {
-                    "is_valid": is_valid,
-                    "risk_score": risk_score,
-                    "sanitized_prompt": prompt
+                    "is_valid": bool(is_valid),  # Ensure boolean
+                    "risk_score": float(risk_score),  # Convert numpy.float32 to Python float
+                    "sanitized_prompt": str(prompt)  # Ensure string
                 }
             else:
                 # Fallback for scanners with different interfaces
@@ -377,25 +378,18 @@ class LLMGuardService:
             return {"error": str(e), "is_valid": False, "risk_score": 1.0}
     
     def _run_scanner_with_prompt(self, scanner: Any, content: str, original_prompt: str) -> Dict[str, Any]:
-        """Run a scanner that requires the original prompt (like Relevance for output scanning)"""
+        """Run a scanner that requires the original prompt (for all output scanners)"""
         try:
             scanner_type = type(scanner).__name__
             
-            if scanner_type == "Relevance" and hasattr(scanner, 'scan'):
-                # Relevance scanner needs the original prompt to compare against output
+            if hasattr(scanner, 'scan'):
+                # All output scanners (Bias, Relevance, Sensitive, etc.) need the original prompt
+                # They use the signature: scan(original_prompt, output_content)
                 prompt, is_valid, risk_score = scanner.scan(original_prompt, content)
                 return {
-                    "is_valid": is_valid,
-                    "risk_score": risk_score,
-                    "sanitized_prompt": prompt
-                }
-            elif hasattr(scanner, 'scan'):
-                # Fallback to regular scan method
-                prompt, is_valid, risk_score = scanner.scan(content)
-                return {
-                    "is_valid": is_valid,
-                    "risk_score": risk_score,
-                    "sanitized_prompt": prompt
+                    "is_valid": bool(is_valid),  # Ensure boolean
+                    "risk_score": float(risk_score),  # Convert numpy.float32 to Python float
+                    "sanitized_prompt": str(prompt)  # Ensure string
                 }
             else:
                 # Fallback for scanners with different interfaces

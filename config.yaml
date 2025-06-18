@@ -73,13 +73,16 @@ llm_guard_service:
         - "hack"
         - "hacking"
         - "exploit"
-        - "vulnerability"
         - "malware"
         - "breach"
         - "crack"
         - "bypass"
         - "penetrate"
         - "intrude"
+        - "harm"
+        - "destroy"
+        - "damage"
+        - "hurt"
     
     ban_topics:
       enabled: true
