@@ -94,6 +94,9 @@ class LLMGuardService:
         """Initialize all configured scanners"""
         logger.info("Initializing scanners...")
         
+        # Get security scanner configurations
+        security_config = settings.llm_guard_service_config.get('security_scanners', {})
+        
         # Input scanners
         if "anonymize" in settings.enabled_input_scanners:
             # Presidio configuration is handled via environment variables in _configure_presidio
@@ -101,66 +104,103 @@ class LLMGuardService:
                 self.input_scanners["anonymize"] = Anonymize(vault=Vault())
             
         if "ban_substrings" in settings.enabled_input_scanners:
-            # Get configuration from settings
-            ban_substrings_config = settings.llm_guard_service_config.get('security_scanners', {}).get('ban_substrings', {})
-            substrings = ban_substrings_config.get('substrings', [
-                "password", "api_key", "secret", "token", 
-                "hack", "hacking", "exploit", "vulnerability", "malware",
-                "breach", "crack", "bypass", "penetrate", "intrude"
-            ])
-            case_sensitive = ban_substrings_config.get('case_sensitive', False)
-            
-            with self._suppress_debug_output():
-                self.input_scanners["ban_substrings"] = BanSubstrings(
-                    substrings=substrings,
-                    case_sensitive=case_sensitive
-                )
+            # Get configuration from settings - no hardcoded fallbacks
+            ban_substrings_config = security_config.get('ban_substrings', {})
+            if not ban_substrings_config.get('enabled', False):
+                logger.warning("ban_substrings scanner is in enabled list but not properly configured in security_scanners section")
+            else:
+                substrings = ban_substrings_config.get('substrings', [])
+                if not substrings:
+                    logger.error("ban_substrings: No substrings configured - scanner will not be effective")
+                    
+                case_sensitive = ban_substrings_config.get('case_sensitive', False)
+                
+                with self._suppress_debug_output():
+                    self.input_scanners["ban_substrings"] = BanSubstrings(
+                        substrings=substrings,
+                        case_sensitive=case_sensitive
+                    )
                 
         if "ban_topics" in settings.enabled_input_scanners:
-            with self._suppress_debug_output():
-                # Get configuration from settings
-                ban_topics_config = settings.llm_guard_service_config.get('security_scanners', {}).get('ban_topics', {})
-                topics = ban_topics_config.get('topics', [
-                    "violence", "illegal", "hate", "hacking", "cybercrime", 
-                    "malware", "fraud", "phishing", "social engineering",
-                    "unauthorized access", "data breach", "computer intrusion"
-                ])
-                threshold = ban_topics_config.get('threshold', 0.6)
-                
-                self.input_scanners["ban_topics"] = BanTopics(
-                    topics=topics,
-                    threshold=threshold
-                )
+            # Get configuration from settings - no hardcoded fallbacks
+            ban_topics_config = security_config.get('ban_topics', {})
+            if not ban_topics_config.get('enabled', False):
+                logger.warning("ban_topics scanner is in enabled list but not properly configured in security_scanners section")
+            else:
+                topics = ban_topics_config.get('topics', [])
+                if not topics:
+                    logger.error("ban_topics: No topics configured - scanner will not be effective")
+                    
+                threshold = ban_topics_config.get('threshold')
+                if threshold is None:
+                    logger.error("ban_topics: No threshold configured - scanner cannot function")
+                else:
+                    with self._suppress_debug_output():
+                        self.input_scanners["ban_topics"] = BanTopics(
+                            topics=topics,
+                            threshold=threshold
+                        )
                 
         if "code" in settings.enabled_input_scanners:
+            # Get configuration from settings for code scanner languages
+            code_config = security_config.get('code', {})
+            languages = code_config.get('languages', ["Python", "JavaScript"])  # Default maintained for backward compatibility
+            
             with self._suppress_debug_output():
-                self.input_scanners["code"] = Code(languages=["Python", "JavaScript"])
+                self.input_scanners["code"] = Code(languages=languages)
                 
         if "prompt_injection" in settings.enabled_input_scanners:
-            with self._suppress_debug_output():
-                # Get configuration from settings
-                prompt_injection_config = settings.llm_guard_service_config.get('security_scanners', {}).get('prompt_injection', {})
-                threshold = prompt_injection_config.get('threshold', 0.8)
-                
-                if threshold < 1.0:
-                    self.input_scanners["prompt_injection"] = PromptInjection(threshold=threshold)
+            # Get configuration from settings - no hardcoded fallbacks
+            prompt_injection_config = security_config.get('prompt_injection', {})
+            if not prompt_injection_config.get('enabled', False):
+                logger.warning("prompt_injection scanner is in enabled list but not properly configured in security_scanners section")
+            else:
+                threshold = prompt_injection_config.get('threshold')
+                if threshold is None:
+                    logger.error("prompt_injection: No threshold configured - using default behavior")
+                    with self._suppress_debug_output():
+                        self.input_scanners["prompt_injection"] = PromptInjection()
                 else:
-                    self.input_scanners["prompt_injection"] = PromptInjection()
+                    with self._suppress_debug_output():
+                        if threshold < 1.0:
+                            self.input_scanners["prompt_injection"] = PromptInjection(threshold=threshold)
+                        else:
+                            self.input_scanners["prompt_injection"] = PromptInjection()
                 
         if "secrets" in settings.enabled_input_scanners:
+            # Enhanced secrets scanner configuration
+            secrets_config = security_config.get('secrets', {})
+            redact_token = secrets_config.get('redact_token', '[REDACTED]')
+            allowed_secrets = secrets_config.get('allowed_secrets', [])
+            
             with self._suppress_debug_output():
-                self.input_scanners["secrets"] = Secrets()
+                if redact_token != '[REDACTED]' or allowed_secrets:
+                    # Use enhanced configuration
+                    self.input_scanners["secrets"] = Secrets(
+                        redact_token=redact_token,
+                        allowed_secrets=allowed_secrets
+                    )
+                else:
+                    # Use default configuration
+                    self.input_scanners["secrets"] = Secrets()
                 
         if "toxicity" in settings.enabled_input_scanners:
-            with self._suppress_debug_output():
-                # Get configuration from settings
-                toxicity_config = settings.llm_guard_service_config.get('security_scanners', {}).get('toxicity', {})
-                threshold = toxicity_config.get('threshold', 0.7)
-                
-                if threshold < 1.0:
-                    self.input_scanners["toxicity"] = Toxicity(threshold=threshold)
+            # Get configuration from settings - no hardcoded fallbacks  
+            toxicity_config = security_config.get('toxicity', {})
+            if not toxicity_config.get('enabled', False):
+                logger.warning("toxicity scanner is in enabled list but not properly configured in security_scanners section")
+            else:
+                threshold = toxicity_config.get('threshold')
+                if threshold is None:
+                    logger.error("toxicity: No threshold configured - using default behavior")
+                    with self._suppress_debug_output():
+                        self.input_scanners["toxicity"] = Toxicity()
                 else:
-                    self.input_scanners["toxicity"] = Toxicity()
+                    with self._suppress_debug_output():
+                        if threshold < 1.0:
+                            self.input_scanners["toxicity"] = Toxicity(threshold=threshold)
+                        else:
+                            self.input_scanners["toxicity"] = Toxicity()
         
         # Output scanners
         if "bias" in settings.enabled_output_scanners:
@@ -188,13 +228,14 @@ class LLMGuardService:
         scanners: Optional[List[str]] = None,
         risk_threshold: float = 0.6,
         user_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        original_prompt: Optional[str] = None  # Added for output scanning with Relevance
     ) -> SecurityCheckResponse:
-        """Main security check method"""
+        """Main security check method with fail-safe error handling"""
         start_time = time.time()
         
         # Check cache first
-        cache_key = self._generate_cache_key(content, content_type, scanners)
+        cache_key = self._generate_cache_key(content, content_type, scanners, original_prompt)
         if self.cache_service:
             cached_result = await self.cache_service.get(cache_key)
             if cached_result:
@@ -207,15 +248,27 @@ class LLMGuardService:
         else:
             active_scanners = self._get_active_scanners(self.output_scanners, scanners)
         
-        # Run scans
+        # Run scans with fail-safe mechanism
         scanner_results = {}
         flagged_scanners = []
         sanitized_content = content
         risk_scores = []
+        scanner_failed = False
         
         for scanner_name, scanner in active_scanners.items():
             try:
-                result = self._run_scanner(scanner, sanitized_content)
+                # Pass original_prompt for relevance scanner in output scanning
+                if scanner_name == "relevance" and content_type == ContentType.OUTPUT and original_prompt:
+                    result = self._run_scanner_with_prompt(scanner, sanitized_content, original_prompt)
+                else:
+                    result = self._run_scanner(scanner, sanitized_content)
+                
+                # Check for critical scanner errors
+                if "error" in result:
+                    logger.error(f"Critical scanner failure for {scanner_name}: {result['error']}")
+                    scanner_failed = True
+                    break  # Immediate fail-safe exit
+                    
                 scanner_results[scanner_name] = result
                 
                 if not result.get("is_valid", True):
@@ -227,8 +280,22 @@ class LLMGuardService:
                     sanitized_content = result["sanitized_prompt"]
                     
             except Exception as e:
-                logger.error(f"Error running scanner {scanner_name}: {e}")
-                scanner_results[scanner_name] = {"error": str(e)}
+                logger.error(f"Critical error running scanner {scanner_name}: {e}")
+                scanner_failed = True
+                break  # Immediate fail-safe exit
+        
+        # Fail-safe response if any scanner failed
+        if scanner_failed:
+            processing_time_ms = (time.time() - start_time) * 1000
+            return SecurityCheckResponse(
+                is_safe=False,
+                risk_score=1.0,
+                sanitized_content=content,  # Return original content when failing safe
+                flagged_scanners=["system_error"],
+                scanner_results={"system_error": {"error": "Scanner system failure - content marked unsafe as precaution"}},
+                recommendations=["System security check failed. Please try again or contact support if the issue persists."],
+                processing_time_ms=processing_time_ms
+            )
         
         # Calculate overall risk score
         risk_score = max(risk_scores) if risk_scores else 0.0
@@ -249,20 +316,27 @@ class LLMGuardService:
             processing_time_ms=processing_time_ms
         )
         
-        # Cache result with dynamic TTL based on result and configuration
+        # Enhanced caching logic with strict safety controls
         cache_config = settings.llm_guard_service_config.get('cache', {})
         should_cache = False
         cache_ttl = settings.cache_ttl  # Default fallback
         
         if self.cache_service:
-            if is_safe and cache_config.get('cache_only_safe', True):
+            # Enforce cache_only_safe: true as a security requirement
+            cache_only_safe = cache_config.get('cache_only_safe', True)
+            if not cache_only_safe:
+                logger.warning("cache_only_safe is disabled - this poses a security risk")
+            
+            if is_safe and cache_only_safe:
                 # Cache safe results with configurable TTL
                 cache_ttl = cache_config.get('safe_result_ttl', settings.cache_ttl)
                 should_cache = cache_ttl > 0
-            elif not is_safe and not cache_config.get('cache_only_safe', True):
-                # Cache unsafe results only if explicitly enabled
+            elif not is_safe and not cache_only_safe:
+                # Cache unsafe results only if explicitly enabled (not recommended)
                 cache_ttl = cache_config.get('unsafe_result_ttl', 0)
                 should_cache = cache_ttl > 0
+                if should_cache:
+                    logger.warning("Caching unsafe result - this may pose security risks")
             
             if should_cache:
                 await self.cache_service.set(
@@ -302,6 +376,36 @@ class LLMGuardService:
             logger.error(f"Scanner execution failed: {e}")
             return {"error": str(e), "is_valid": False, "risk_score": 1.0}
     
+    def _run_scanner_with_prompt(self, scanner: Any, content: str, original_prompt: str) -> Dict[str, Any]:
+        """Run a scanner that requires the original prompt (like Relevance for output scanning)"""
+        try:
+            scanner_type = type(scanner).__name__
+            
+            if scanner_type == "Relevance" and hasattr(scanner, 'scan'):
+                # Relevance scanner needs the original prompt to compare against output
+                prompt, is_valid, risk_score = scanner.scan(original_prompt, content)
+                return {
+                    "is_valid": is_valid,
+                    "risk_score": risk_score,
+                    "sanitized_prompt": prompt
+                }
+            elif hasattr(scanner, 'scan'):
+                # Fallback to regular scan method
+                prompt, is_valid, risk_score = scanner.scan(content)
+                return {
+                    "is_valid": is_valid,
+                    "risk_score": risk_score,
+                    "sanitized_prompt": prompt
+                }
+            else:
+                # Fallback for scanners with different interfaces
+                result = scanner(content)
+                return {"result": result, "is_valid": True, "risk_score": 0.0}
+                
+        except Exception as e:
+            logger.error(f"Scanner with prompt execution failed: {e}")
+            return {"error": str(e), "is_valid": False, "risk_score": 1.0}
+    
     def _get_active_scanners(
         self, 
         scanner_dict: Dict[str, Any], 
@@ -316,7 +420,8 @@ class LLMGuardService:
         self, 
         content: str, 
         content_type: ContentType,
-        scanners: Optional[List[str]]
+        scanners: Optional[List[str]],
+        original_prompt: Optional[str] = None
     ) -> str:
         """Generate cache key for content with configuration versioning"""
         # Include scanner configuration in cache key for auto-invalidation
@@ -326,7 +431,8 @@ class LLMGuardService:
             content,
             content_type.value,
             ",".join(sorted(scanners)) if scanners else "all",
-            scanner_config_hash  # This makes cache invalid when config changes
+            scanner_config_hash,  # This makes cache invalid when config changes
+            original_prompt if content_type == ContentType.OUTPUT and original_prompt else ""
         ]
         key_string = "|".join(key_parts)
         return f"security:{hashlib.sha256(key_string.encode()).hexdigest()}"

@@ -53,7 +53,7 @@ llm_guard_service:
     unsafe_result_ttl: 0       # Don't cache unsafe results (0 = disabled)
     
     # Cache behavior controls
-    cache_only_safe: true       # Only cache safe results (recommended)
+    cache_only_safe: true       # Only cache safe results (recommended for security)
     auto_invalidate: true       # Auto-invalidate on config changes
     
     # Cache size limits
@@ -64,6 +64,7 @@ llm_guard_service:
     ban_substrings:
       enabled: true
       case_sensitive: false
+      # Specific substrings to ban - be explicit about security risks
       substrings:
         - "password"
         - "api_key" 
@@ -82,7 +83,8 @@ llm_guard_service:
     
     ban_topics:
       enabled: true
-      threshold: 0.6  # Lower values catch more potential threats
+      threshold: 0.6  # Lower values catch more potential threats (0.0-1.0)
+      # Conceptual topics to ban - for semantic filtering
       topics:
         - "violence"
         - "illegal"
@@ -97,14 +99,55 @@ llm_guard_service:
         - "data breach"
         - "computer intrusion"
     
+    # Code detection scanner configuration
+    code:
+      enabled: true
+      # Languages to scan for - only supported languages from llm-guard
+      # Supported: ['ARM Assembly', 'AppleScript', 'C', 'C#', 'C++', 'COBOL', 'Erlang', 'Fortran', 'Go', 'Java', 'JavaScript', 'Kotlin', 'Lua', 'Mathematica/Wolfram Language', 'PHP', 'Pascal', 'Perl', 'PowerShell', 'Python', 'R', 'Ruby', 'Rust', 'Scala', 'Swift', 'Visual Basic .NET', 'jq']
+      languages:
+        - "Python"
+        - "JavaScript"
+        - "PowerShell"
+        - "PHP"
+        - "Go"
+    
+    # Enhanced secrets scanner configuration
+    secrets:
+      enabled: true
+      # Token to use for redacting secrets (default: [REDACTED])
+      redact_token: "[REDACTED]"
+      # List of secrets that are allowed to pass through
+      allowed_secrets: []
+      # Examples of allowed_secrets:
+      # - "example_api_key_for_testing"
+      # - "demo_password_123"
+    
     toxicity:
       enabled: true
-      threshold: 0.7  # Threshold for toxicity detection
+      threshold: 0.7  # Threshold for toxicity detection (0.0-1.0)
       
     prompt_injection:
       enabled: true
-      threshold: 0.8  # Threshold for prompt injection detection
+      threshold: 0.8  # Threshold for prompt injection detection (0.0-1.0)
     
+    # Additional scanner configurations can be added here
+    # anonymize:
+    #   enabled: true
+    #   # Presidio configuration handled in presidio section below
+    
+  # Scanner usage strategy documentation
+  scanner_strategy:
+    # BanSubstrings vs BanTopics usage:
+    # - BanSubstrings: Use for exact, known-bad patterns and specific keywords
+    # - BanTopics: Use for conceptual, semantic filtering of topics
+    # - Both can work together for layered security
+    # 
+    # Recommended approach:
+    # 1. Use BanSubstrings for specific security terms and API keys
+    # 2. Use BanTopics for broader conceptual filtering
+    # 3. Adjust thresholds based on your risk tolerance
+    # 4. Monitor logs to tune thresholds and avoid false positives
+
 # Presidio Analyzer Configuration
 presidio:
   # Map model outputs to Presidio entity types
