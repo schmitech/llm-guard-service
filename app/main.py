@@ -10,14 +10,41 @@ from app.models.request_models import (
     SanitizeRequest, HealthResponse
 )
 from app.routers import metrics
-
-# Configure logging
-logging.basicConfig(level=settings.log_level)
-logger = logging.getLogger(__name__)
+import os
+from logging.handlers import TimedRotatingFileHandler
+import logging.config
+import yaml
 
 # Global services
 guard_service: Optional[LLMGuardService] = None
 cache_service: Optional[CacheService] = None
+
+# Ensure logs directory exists
+logs_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs'))
+os.makedirs(logs_dir, exist_ok=True)
+
+# Try to load logging config from config.yaml  
+# __file__ is app/main.py, so we need to go up two levels to get to the project root
+config_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config.yaml'))
+if os.path.exists(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        if 'logging' in config:
+            logging.config.dictConfig(config['logging'])
+            print(f"Loaded logging config from: {config_path}")
+        else:
+            print("No logging config found in config.yaml, using basic config")
+            logging.basicConfig(level=logging.INFO)
+    except Exception as e:
+        print(f"Failed to load logging config from config.yaml: {e}")
+        logging.basicConfig(level=logging.INFO)
+else:
+    print(f"Config file not found at: {config_path}")
+    logging.basicConfig(level=logging.INFO)
+
+logger = logging.getLogger(__name__)
+logger.info("Logger initialized successfully")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

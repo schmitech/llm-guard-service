@@ -1,0 +1,88 @@
+logging:
+  version: 1
+  formatters:
+    default:
+      format: '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+  handlers:
+    file:
+      class: logging.handlers.TimedRotatingFileHandler
+      filename: logs/llm-guard-service.log
+      when: midnight
+      backupCount: 7
+      formatter: default
+      level: INFO
+    console:
+      class: logging.StreamHandler
+      formatter: default
+      level: WARNING
+  root:
+    handlers: [file, console]
+    level: INFO
+  loggers:
+    presidio-analyzer:
+      level: ERROR
+      handlers: [file, console]
+      propagate: 0
+    uvicorn:
+      level: INFO
+      handlers: [file, console]
+      propagate: 0
+    uvicorn.error:
+      level: INFO
+      handlers: [file, console]
+      propagate: 0
+    uvicorn.access:
+      level: WARNING
+      handlers: [file, console]
+      propagate: 0
+
+# LLM Guard Service Configuration
+llm_guard_service:
+  # Set to true to enable verbose model initialization logging
+  verbose_initialization: true
+
+# Presidio Analyzer Configuration
+presidio:
+  # Map model outputs to Presidio entity types
+  model_to_presidio_entity_mapping:
+    PER: PERSON
+    PERSON: PERSON
+    LOC: LOCATION
+    LOCATION: LOCATION
+    ORG: ORGANIZATION
+    ORGANIZATION: ORGANIZATION
+    MISC: NRP
+    GPE: LOCATION
+    
+  # Entity names that should be treated as low confidence
+  low_score_entity_names:
+    - PERSON
+    - ORGANIZATION
+    - LOCATION
+    - NRP
+    
+  # Entity labels to ignore during analysis
+  labels_to_ignore:
+    - O  # Outside entity marker
+    - MISC  # Miscellaneous entities that are often false positives
+    
+  # Additional configuration options
+  supported_languages:
+    - en
+    - es
+    - fr
+    - de
+    - it
+    
+  # Confidence thresholds for different entity types
+  confidence_thresholds:
+    PERSON: 0.85
+    EMAIL_ADDRESS: 0.95
+    PHONE_NUMBER: 0.90
+    CREDIT_CARD: 0.95
+    SSN: 0.95
+    IBAN_CODE: 0.95
+    IP_ADDRESS: 0.95
+    LOCATION: 0.80
+    ORGANIZATION: 0.80
+    DATE_TIME: 0.85

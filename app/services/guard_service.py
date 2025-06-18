@@ -2,6 +2,9 @@ import time
 import hashlib
 import json
 import logging
+import os
+import sys
+import contextlib
 from typing import List, Dict, Any, Optional, Tuple
 from llm_guard.input_scanners import (
     Anonymize, BanSubstrings, BanTopics, Code,
@@ -17,66 +20,132 @@ from app.services.cache_service import CacheService
 
 logger = logging.getLogger(__name__)
 
-# Suppress presidio-analyzer warnings about unsupported languages
-class PresidioWarningFilter(logging.Filter):
-    def filter(self, record):
-        return not (
-            record.levelname == 'WARNING' and 
-            'Recognizer not added to registry because language is not supported' in record.getMessage()
-        )
-
-presidio_logger = logging.getLogger("presidio-analyzer")
-presidio_logger.addFilter(PresidioWarningFilter())
-
 class LLMGuardService:
     def __init__(self):
         self.input_scanners = {}
         self.output_scanners = {}
         self.cache_service = CacheService() if settings.enable_caching else None
+        self._configure_presidio()
         self._initialize_scanners()
+    
+    def _configure_presidio(self):
+        """Configure presidio analyzer settings"""
+        if settings.presidio_config:
+            presidio_config = settings.presidio_config
+            
+            # Create a presidio configuration file
+            try:
+                import json
+                presidio_config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'presidio_config.json')
+                
+                # Create configuration dict for presidio
+                presidio_file_config = {}
+                
+                if "model_to_presidio_entity_mapping" in presidio_config:
+                    presidio_file_config["model_to_presidio_entity_mapping"] = presidio_config["model_to_presidio_entity_mapping"]
+                
+                if "low_score_entity_names" in presidio_config:
+                    presidio_file_config["low_score_entity_names"] = presidio_config["low_score_entity_names"]
+                
+                if "labels_to_ignore" in presidio_config:
+                    presidio_file_config["labels_to_ignore"] = presidio_config["labels_to_ignore"]
+                
+                if "supported_languages" in presidio_config:
+                    presidio_file_config["supported_languages"] = presidio_config["supported_languages"]
+                
+                # Write configuration file
+                with open(presidio_config_path, 'w') as f:
+                    json.dump(presidio_file_config, f, indent=2)
+                
+                # Set environment variable to point to config file
+                os.environ["PRESIDIO_ANALYZER_CONFIG"] = presidio_config_path
+                
+                logger.info(f"Created presidio configuration file at: {presidio_config_path}")
+                
+            except Exception as e:
+                logger.warning(f"Could not create presidio configuration file: {e}")
         
+    @contextlib.contextmanager
+    def _suppress_debug_output(self):
+        """Context manager to suppress debug output during model loading"""
+        # Check if verbose initialization is enabled
+        verbose_init = settings.llm_guard_service_config.get('verbose_initialization', False)
+        if verbose_init:
+            # Don't suppress output if verbose initialization is enabled
+            yield
+            return
+            
+        # Save original stderr and stdout
+        original_stderr = sys.stderr
+        original_stdout = sys.stdout
+        
+        try:
+            # Redirect to devnull to suppress debug messages
+            with open(os.devnull, 'w') as devnull:
+                sys.stderr = devnull
+                sys.stdout = devnull
+                yield
+        finally:
+            # Restore original stderr and stdout
+            sys.stderr = original_stderr
+            sys.stdout = original_stdout
+
     def _initialize_scanners(self):
         """Initialize all configured scanners"""
+        logger.info("Initializing scanners...")
+        
         # Input scanners
         if "anonymize" in settings.enabled_input_scanners:
-            self.input_scanners["anonymize"] = Anonymize(vault=Vault())
+            # Presidio configuration is handled via environment variables in _configure_presidio
+            with self._suppress_debug_output():
+                self.input_scanners["anonymize"] = Anonymize(vault=Vault())
             
         if "ban_substrings" in settings.enabled_input_scanners:
-            self.input_scanners["ban_substrings"] = BanSubstrings(
-                substrings=["password", "api_key", "secret", "token"],
-                case_sensitive=False
-            )
-            
+            with self._suppress_debug_output():
+                self.input_scanners["ban_substrings"] = BanSubstrings(
+                    substrings=["password", "api_key", "secret", "token"],
+                    case_sensitive=False
+                )
+                
         if "ban_topics" in settings.enabled_input_scanners:
-            self.input_scanners["ban_topics"] = BanTopics(
-                topics=["violence", "illegal", "hate"],
-                threshold=0.8  # Set higher threshold to reduce false positives
-            )
-            
+            with self._suppress_debug_output():
+                self.input_scanners["ban_topics"] = BanTopics(
+                    topics=["violence", "illegal", "hate"],
+                    threshold=0.8  # Set higher threshold to reduce false positives
+                )
+                
         if "code" in settings.enabled_input_scanners:
-            self.input_scanners["code"] = Code(languages=["Python", "JavaScript"])
-            
+            with self._suppress_debug_output():
+                self.input_scanners["code"] = Code(languages=["Python", "JavaScript"])
+                
         if "prompt_injection" in settings.enabled_input_scanners:
-            self.input_scanners["prompt_injection"] = PromptInjection()
-            
+            with self._suppress_debug_output():
+                self.input_scanners["prompt_injection"] = PromptInjection()
+                
         if "secrets" in settings.enabled_input_scanners:
-            self.input_scanners["secrets"] = Secrets()
-            
+            with self._suppress_debug_output():
+                self.input_scanners["secrets"] = Secrets()
+                
         if "toxicity" in settings.enabled_input_scanners:
-            self.input_scanners["toxicity"] = Toxicity()
+            with self._suppress_debug_output():
+                self.input_scanners["toxicity"] = Toxicity()
         
         # Output scanners
         if "bias" in settings.enabled_output_scanners:
-            self.output_scanners["bias"] = Bias()
-            
+            with self._suppress_debug_output():
+                self.output_scanners["bias"] = Bias()
+                
         if "no_refusal" in settings.enabled_output_scanners:
-            self.output_scanners["no_refusal"] = NoRefusal()
-            
+            with self._suppress_debug_output():
+                self.output_scanners["no_refusal"] = NoRefusal()
+                
         if "relevance" in settings.enabled_output_scanners:
-            self.output_scanners["relevance"] = Relevance()
-            
+            with self._suppress_debug_output():
+                self.output_scanners["relevance"] = Relevance()
+                
         if "sensitive" in settings.enabled_output_scanners:
-            self.output_scanners["sensitive"] = Sensitive()
+            with self._suppress_debug_output():
+                self.output_scanners["sensitive"] = Sensitive()
             
         logger.info(f"Initialized {len(self.input_scanners)} input scanners and {len(self.output_scanners)} output scanners")
     

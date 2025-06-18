@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+import yaml
+import os
 
 class Settings(BaseSettings):
     # Service configuration
@@ -35,6 +37,30 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = "INFO"
+    
+    # Presidio configuration - loaded from config.yaml
+    presidio_config: Optional[Dict[str, Any]] = None
+    
+    # LLM Guard service configuration
+    llm_guard_service_config: Optional[Dict[str, Any]] = None
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._load_presidio_config()
+    
+    def _load_presidio_config(self):
+        """Load presidio configuration from config.yaml"""
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'config.yaml')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    self.presidio_config = config.get('presidio', {})
+                    self.llm_guard_service_config = config.get('llm_guard_service', {})
+        except Exception as e:
+            # Silently fall back to empty config if loading fails
+            self.presidio_config = {}
+            self.llm_guard_service_config = {}
     
     class Config:
         env_file = ".env.local"  # Changed to use .env.local

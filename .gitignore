@@ -194,3 +194,7 @@ cython_debug/
 .cursorindexingignore
 .env.local
 .env
+/logs/
+
+# Generated configuration files
+presidio_config.json
