@@ -99,19 +99,21 @@ class LLMGuardService:
         
         # Input scanners
         if "anonymize" in settings.enabled_input_scanners:
-            # Presidio configuration is handled via environment variables in _configure_presidio
-            with self._suppress_debug_output():
-                self.input_scanners["anonymize"] = Anonymize(vault=Vault())
+            anonymize_config = security_config.get('anonymize', {})
+            if anonymize_config.get('enabled', False):
+                # Presidio configuration is handled via environment variables in _configure_presidio
+                with self._suppress_debug_output():
+                    self.input_scanners["anonymize"] = Anonymize(vault=Vault())
+            else:
+                logger.warning("anonymize scanner is in enabled list but disabled in security_scanners config")
             
         if "ban_substrings" in settings.enabled_input_scanners:
             # Get configuration from settings - no hardcoded fallbacks
             ban_substrings_config = security_config.get('ban_substrings', {})
-            if not ban_substrings_config.get('enabled', False):
-                logger.warning("ban_substrings scanner is in enabled list but not properly configured in security_scanners section")
-            else:
+            if ban_substrings_config.get('enabled', False):
                 substrings = ban_substrings_config.get('substrings', [])
                 if not substrings:
-                    logger.error("ban_substrings: No substrings configured - scanner will not be effective")
+                    logger.warning("ban_substrings: No substrings configured - scanner will not be effective")
                     
                 case_sensitive = ban_substrings_config.get('case_sensitive', False)
                 
@@ -120,87 +122,83 @@ class LLMGuardService:
                         substrings=substrings,
                         case_sensitive=case_sensitive
                     )
+            else:
+                logger.warning("ban_substrings scanner is in enabled list but disabled in security_scanners config")
                 
         if "ban_topics" in settings.enabled_input_scanners:
             # Get configuration from settings - no hardcoded fallbacks
             ban_topics_config = security_config.get('ban_topics', {})
-            if not ban_topics_config.get('enabled', False):
-                logger.warning("ban_topics scanner is in enabled list but not properly configured in security_scanners section")
-            else:
+            if ban_topics_config.get('enabled', False):
                 topics = ban_topics_config.get('topics', [])
                 if not topics:
-                    logger.error("ban_topics: No topics configured - scanner will not be effective")
+                    logger.warning("ban_topics: No topics configured - scanner will not be effective")
                     
                 threshold = ban_topics_config.get('threshold')
-                if threshold is None:
-                    logger.error("ban_topics: No threshold configured - scanner cannot function")
-                else:
+                if threshold is not None:
                     with self._suppress_debug_output():
                         self.input_scanners["ban_topics"] = BanTopics(
                             topics=topics,
                             threshold=threshold
                         )
+            else:
+                logger.warning("ban_topics scanner is in enabled list but disabled in security_scanners config")
                 
         if "code" in settings.enabled_input_scanners:
             # Get configuration from settings for code scanner languages
             code_config = security_config.get('code', {})
-            languages = code_config.get('languages', ["Python", "JavaScript"])  # Default maintained for backward compatibility
-            
-            with self._suppress_debug_output():
-                self.input_scanners["code"] = Code(languages=languages)
+            if code_config.get('enabled', False):
+                languages = code_config.get('languages', ["Python", "JavaScript"])  # Default maintained for backward compatibility
+                
+                with self._suppress_debug_output():
+                    self.input_scanners["code"] = Code(languages=languages)
+            else:
+                logger.warning("code scanner is in enabled list but disabled in security_scanners config")
                 
         if "prompt_injection" in settings.enabled_input_scanners:
             # Get configuration from settings - no hardcoded fallbacks
             prompt_injection_config = security_config.get('prompt_injection', {})
-            if not prompt_injection_config.get('enabled', False):
-                logger.warning("prompt_injection scanner is in enabled list but not properly configured in security_scanners section")
-            else:
+            if prompt_injection_config.get('enabled', False):
                 threshold = prompt_injection_config.get('threshold')
-                if threshold is None:
-                    logger.error("prompt_injection: No threshold configured - using default behavior")
-                    with self._suppress_debug_output():
+                with self._suppress_debug_output():
+                    if threshold is None:
+                        logger.warning("prompt_injection: No threshold configured - using default behavior")
                         self.input_scanners["prompt_injection"] = PromptInjection()
-                else:
-                    with self._suppress_debug_output():
-                        if threshold < 1.0:
-                            self.input_scanners["prompt_injection"] = PromptInjection(threshold=threshold)
-                        else:
-                            self.input_scanners["prompt_injection"] = PromptInjection()
+                    else:
+                        self.input_scanners["prompt_injection"] = PromptInjection(threshold=threshold)
+            else:
+                logger.warning("prompt_injection scanner is in enabled list but disabled in security_scanners config")
                 
         if "secrets" in settings.enabled_input_scanners:
             # Enhanced secrets scanner configuration
             secrets_config = security_config.get('secrets', {})
-            redact_token = secrets_config.get('redact_token', '[REDACTED]')
-            allowed_secrets = secrets_config.get('allowed_secrets', [])
-            
-            with self._suppress_debug_output():
-                if redact_token != '[REDACTED]' or allowed_secrets:
-                    # Use enhanced configuration
-                    self.input_scanners["secrets"] = Secrets(
-                        redact_token=redact_token,
-                        allowed_secrets=allowed_secrets
-                    )
-                else:
-                    # Use default configuration
-                    self.input_scanners["secrets"] = Secrets()
+            if secrets_config.get('enabled', False):
+                allowed_secrets = secrets_config.get('allowed_secrets', [])
+                
+                with self._suppress_debug_output():
+                    if allowed_secrets:
+                        # Use enhanced configuration
+                        self.input_scanners["secrets"] = Secrets(
+                            allowed_secrets=allowed_secrets
+                        )
+                    else:
+                        # Use default configuration
+                        self.input_scanners["secrets"] = Secrets()
+            else:
+                logger.warning("secrets scanner is in enabled list but disabled in security_scanners config")
                 
         if "toxicity" in settings.enabled_input_scanners:
             # Get configuration from settings - no hardcoded fallbacks  
             toxicity_config = security_config.get('toxicity', {})
-            if not toxicity_config.get('enabled', False):
-                logger.warning("toxicity scanner is in enabled list but not properly configured in security_scanners section")
-            else:
+            if toxicity_config.get('enabled', False):
                 threshold = toxicity_config.get('threshold')
-                if threshold is None:
-                    logger.error("toxicity: No threshold configured - using default behavior")
-                    with self._suppress_debug_output():
+                with self._suppress_debug_output():
+                    if threshold is None:
+                        logger.warning("toxicity: No threshold configured - using default behavior")
                         self.input_scanners["toxicity"] = Toxicity()
-                else:
-                    with self._suppress_debug_output():
-                        if threshold < 1.0:
-                            self.input_scanners["toxicity"] = Toxicity(threshold=threshold)
-                        else:
-                            self.input_scanners["toxicity"] = Toxicity()
+                    else:
+                        self.input_scanners["toxicity"] = Toxicity(threshold=threshold)
+            else:
+                logger.warning("toxicity scanner is in enabled list but disabled in security_scanners config")
         
         # Output scanners
         if "bias" in settings.enabled_output_scanners:
@@ -221,6 +219,39 @@ class LLMGuardService:
             
         logger.info(f"Initialized {len(self.input_scanners)} input scanners and {len(self.output_scanners)} output scanners")
     
+    def _run_scanner(self, scanner: Any, content: str, original_prompt: Optional[str] = None) -> Dict[str, Any]:
+        """Run a single scanner and return results. Handles both input and output scanners.
+        
+        Args:
+            scanner: The scanner instance to run
+            content: The content to scan
+            original_prompt: Optional original prompt for output scanners
+            
+        Returns:
+            Dict containing scan results with is_valid, risk_score, and sanitized_prompt
+        """
+        try:
+            if hasattr(scanner, 'scan'):
+                # For output scanners, original_prompt will be provided
+                if original_prompt is not None:
+                    prompt, is_valid, risk_score = scanner.scan(original_prompt, content)
+                else:
+                    prompt, is_valid, risk_score = scanner.scan(content)
+                
+                return {
+                    "is_valid": bool(is_valid),  # Ensure boolean
+                    "risk_score": float(risk_score),  # Convert numpy.float32 to Python float
+                    "sanitized_prompt": str(prompt)  # Ensure string
+                }
+            else:
+                # Fallback for scanners with different interfaces
+                result = scanner(content)
+                return {"result": result, "is_valid": True, "risk_score": 0.0}
+                
+        except Exception as e:
+            logger.error(f"Scanner execution failed for {type(scanner).__name__}: {e}")
+            return {"error": str(e), "is_valid": False, "risk_score": 1.0}
+
     async def check_content(
         self, 
         content: str, 
@@ -259,8 +290,7 @@ class LLMGuardService:
             try:
                 # All output scanners require the original prompt for comparison
                 if content_type == ContentType.OUTPUT:
-                    # Pass original_prompt even if None - output scanners need two arguments
-                    result = self._run_scanner_with_prompt(scanner, sanitized_content, original_prompt or "")
+                    result = self._run_scanner(scanner, sanitized_content, original_prompt or "")
                 else:
                     result = self._run_scanner(scanner, sanitized_content)
                 
@@ -354,51 +384,6 @@ class LLMGuardService:
         )
         
         return response
-    
-    def _run_scanner(self, scanner: Any, content: str) -> Dict[str, Any]:
-        """Run a single scanner and return results"""
-        try:
-            # Different scanners have different interfaces
-            scanner_type = type(scanner).__name__
-            
-            if hasattr(scanner, 'scan'):
-                prompt, is_valid, risk_score = scanner.scan(content)
-                return {
-                    "is_valid": bool(is_valid),  # Ensure boolean
-                    "risk_score": float(risk_score),  # Convert numpy.float32 to Python float
-                    "sanitized_prompt": str(prompt)  # Ensure string
-                }
-            else:
-                # Fallback for scanners with different interfaces
-                result = scanner(content)
-                return {"result": result, "is_valid": True, "risk_score": 0.0}
-                
-        except Exception as e:
-            logger.error(f"Scanner execution failed: {e}")
-            return {"error": str(e), "is_valid": False, "risk_score": 1.0}
-    
-    def _run_scanner_with_prompt(self, scanner: Any, content: str, original_prompt: str) -> Dict[str, Any]:
-        """Run a scanner that requires the original prompt (for all output scanners)"""
-        try:
-            scanner_type = type(scanner).__name__
-            
-            if hasattr(scanner, 'scan'):
-                # All output scanners (Bias, Relevance, Sensitive, etc.) need the original prompt
-                # They use the signature: scan(original_prompt, output_content)
-                prompt, is_valid, risk_score = scanner.scan(original_prompt, content)
-                return {
-                    "is_valid": bool(is_valid),  # Ensure boolean
-                    "risk_score": float(risk_score),  # Convert numpy.float32 to Python float
-                    "sanitized_prompt": str(prompt)  # Ensure string
-                }
-            else:
-                # Fallback for scanners with different interfaces
-                result = scanner(content)
-                return {"result": result, "is_valid": True, "risk_score": 0.0}
-                
-        except Exception as e:
-            logger.error(f"Scanner with prompt execution failed: {e}")
-            return {"error": str(e), "is_valid": False, "risk_score": 1.0}
     
     def _get_active_scanners(
         self, 

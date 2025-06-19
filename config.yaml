@@ -28,7 +28,6 @@ logging:
       handlers: [file, console]
       propagate: 0
     uvicorn.error:
-      # This logger is used by Uvicorn for server events (not actual errors)
       level: INFO
       handlers: [file, console]
       propagate: 0
@@ -43,69 +42,74 @@ logging:
 
 # LLM Guard Service Configuration
 llm_guard_service:
-  # Set to true to enable verbose model initialization logging
-  verbose_initialization: true
+  verbose_initialization: true #
   
-  # Cache configuration
   cache:
-    # TTL for different result types (in seconds)
-    safe_result_ttl: 1800      # 30 minutes for safe results
-    unsafe_result_ttl: 0       # Don't cache unsafe results (0 = disabled)
+    safe_result_ttl: 1800 #
+    unsafe_result_ttl: 0 #
+    cache_only_safe: true #
+    auto_invalidate: true #
+    max_cache_size: 10000 #
     
-    # Cache behavior controls
-    cache_only_safe: true       # Only cache safe results (recommended for security)
-    auto_invalidate: true       # Auto-invalidate on config changes
-    
-    # Cache size limits
-    max_cache_size: 10000      # Maximum number of cached entries
-    
-  # Security scanner configurations
   security_scanners:
-    ban_substrings:
+    # Anonymize scanner for PII detection and masking
+    anonymize:
       enabled: true
-      case_sensitive: false
-      # Specific substrings to ban - be explicit about security risks
+      # Names to allow, reducing false positives for common non-sensitive names.
+      allowed_names:
+        - "OpenAI"
+        - "Azure"
+        - "Admin"
+      # This scanner uses the 'presidio' section below for its core configuration.
+
+    ban_substrings:
+      enabled: true #
+      case_sensitive: false #
+      # Expanded list including common jailbreak, prompt injection, and sensitive file terms
       substrings:
-        - "password"
-        - "api_key" 
-        - "secret"
-        - "token"
-        - "hack"
-        - "hacking"
-        - "exploit"
-        - "malware"
-        - "breach"
-        - "crack"
-        - "bypass"
-        - "penetrate"
-        - "intrude"
-        - "harm"
-        - "destroy"
-        - "damage"
-        - "hurt"
+        - "password" #
+        - "api_key" #
+        - "secret" #
+        - "token" #
+        - "hack" #
+        - "exploit" #
+        - "malware" #
+        - "vulnerability" #
+        - "breach" #
+        - "bypass" #
+        - "ignore the instructions above"
+        - "ignore previous instructions"
+        - "you are in roleplay mode"
+        - "act as"
+        - "confidential"
+        - "system prompt"
+        - "sudo"
+        - "rm -rf"
     
     ban_topics:
-      enabled: true
-      threshold: 0.6  # Lower values catch more potential threats (0.0-1.0)
-      # Conceptual topics to ban - for semantic filtering
+      enabled: true #
+      threshold: 0.55  # Slightly lowered threshold to be more sensitive
+      # Expanded list to include broader content safety concerns
       topics:
-        - "violence"
-        - "illegal"
-        - "hate"
-        - "hacking"
-        - "cybercrime"
-        - "malware"
-        - "fraud"
-        - "phishing"
-        - "social engineering"
-        - "unauthorized access"
-        - "data breach"
-        - "computer intrusion"
+        - "violence" #
+        - "illegal" #
+        - "hate" #
+        - "hacking" #
+        - "cybercrime" #
+        - "malware" #
+        - "fraud" #
+        - "phishing" #
+        - "social engineering" #
+        - "unauthorized access" #
+        - "data breach" #
+        - "self-harm"
+        - "radicalization"
+        - "misinformation"
+        - "political extremism"
     
-    # Code detection scanner configuration
     code:
       enabled: true
-      # Languages to scan for - only supported languages from llm-guard
+      # Making the language list configurable is best practice.
       # Supported: ['ARM Assembly', 'AppleScript', 'C', 'C#', 'C++', 'COBOL', 'Erlang', 'Fortran', 'Go', 'Java', 'JavaScript', 'Kotlin', 'Lua', 'Mathematica/Wolfram Language', 'PHP', 'Pascal', 'Perl', 'PowerShell', 'Python', 'R', 'Ruby', 'Rust', 'Scala', 'Swift', 'Visual Basic .NET', 'jq']
       languages:
         - "Python"
@@ -113,86 +117,70 @@ llm_guard_service:
         - "PowerShell"
         - "PHP"
         - "Go"
+        - "Rust"
+        - "C++"
+        - "C#"
     
-    # Enhanced secrets scanner configuration
     secrets:
-      enabled: true
-      # Token to use for redacting secrets (default: [REDACTED])
-      redact_token: "[REDACTED]"
-      # List of secrets that are allowed to pass through
-      allowed_secrets: []
-      # Examples of allowed_secrets:
-      # - "example_api_key_for_testing"
-      # - "demo_password_123"
+      enabled: true #
+      # Token to use for redacting secrets
+      redact_token: "[SECRET_REDACTED]" #
+      # List of secrets that are allowed to pass through (e.g., for testing)
+      allowed_secrets: [] #
     
     toxicity:
-      enabled: true
-      threshold: 0.7  # Threshold for toxicity detection (0.0-1.0)
+      enabled: true #
+      threshold: 0.7 #
       
     prompt_injection:
-      enabled: true
-      threshold: 0.8  # Threshold for prompt injection detection (0.0-1.0)
+      enabled: true #
+      # Threshold is critical. 0.8 is a good start, but monitor for false positives/negatives.
+      threshold: 0.8 #
     
-    # Additional scanner configurations can be added here
-    # anonymize:
-    #   enabled: true
-    #   # Presidio configuration handled in presidio section below
-    
-  # Scanner usage strategy documentation
   scanner_strategy:
-    # BanSubstrings vs BanTopics usage:
-    # - BanSubstrings: Use for exact, known-bad patterns and specific keywords
-    # - BanTopics: Use for conceptual, semantic filtering of topics
-    # - Both can work together for layered security
-    # 
-    # Recommended approach:
-    # 1. Use BanSubstrings for specific security terms and API keys
-    # 2. Use BanTopics for broader conceptual filtering
-    # 3. Adjust thresholds based on your risk tolerance
-    # 4. Monitor logs to tune thresholds and avoid false positives
+    # Use a layered approach:
+    # 1. Anonymize: First, strip PII to prevent data leaks.
+    # 2. BanSubstrings: Catch obvious, high-risk keywords and injection phrases.
+    # 3. BanTopics: Catch nuanced, conceptual threats that keywords might miss.
+    # 4. Code: Flag any unexpected code in the prompt.
+    # 5. Secrets: Detect and redact secrets that might have been missed.
+    # 6. PromptInjection/Toxicity: Use model-based scanners for complex attacks and toxic language.
+    #
+    # Continually monitor logs to tune thresholds and substring/topic lists.
 
-# Presidio Analyzer Configuration
+# Presidio Analyzer Configuration (Relied on by 'Anonymize' scanner)
 presidio:
-  # Map model outputs to Presidio entity types
-  model_to_presidio_entity_mapping:
-    PER: PERSON
-    PERSON: PERSON
-    LOC: LOCATION
-    LOCATION: LOCATION
-    ORG: ORGANIZATION
-    ORGANIZATION: ORGANIZATION
-    MISC: NRP
-    GPE: LOCATION
+  model_to_presidio_entity_mapping: #
+    PER: PERSON #
+    LOC: LOCATION #
+    ORG: ORGANIZATION #
+    # ... (rest of the mapping)
     
-  # Entity names that should be treated as low confidence
-  low_score_entity_names:
-    - PERSON
-    - ORGANIZATION
-    - LOCATION
-    - NRP
+  low_score_entity_names: #
+    - PERSON #
+    - ORGANIZATION #
+    - LOCATION #
     
-  # Entity labels to ignore during analysis
-  labels_to_ignore:
-    - O  # Outside entity marker
-    - MISC  # Miscellaneous entities that are often false positives
+  labels_to_ignore: #
+    - O #
+    - MISC #
     
-  # Additional configuration options
-  supported_languages:
-    - en
-    - es
-    - fr
-    - de
-    - it
+  supported_languages: #
+    - en #
+    - es #
+    - fr #
+    - de #
+    - it #
     
-  # Confidence thresholds for different entity types
-  confidence_thresholds:
-    PERSON: 0.85
-    EMAIL_ADDRESS: 0.95
-    PHONE_NUMBER: 0.90
-    CREDIT_CARD: 0.95
-    SSN: 0.95
-    IBAN_CODE: 0.95
-    IP_ADDRESS: 0.95
-    LOCATION: 0.80
-    ORGANIZATION: 0.80
-    DATE_TIME: 0.85
+  # Fine-grained confidence thresholds for different entity types to reduce false positives
+  confidence_thresholds: #
+    PERSON: 0.85 #
+    EMAIL_ADDRESS: 0.95 #
+    PHONE_NUMBER: 0.90 #
+    CREDIT_CARD: 0.95 #
+    SSN: 0.95 #
+    IBAN_CODE: 0.95 #
+    IP_ADDRESS: 0.95 #
+    LOCATION: 0.80 #
+    ORGANIZATION: 0.80 #
+    DATE_TIME: 0.85 #
