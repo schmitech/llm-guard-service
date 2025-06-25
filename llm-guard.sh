@@ -101,6 +101,7 @@ usage() {
     echo ""
     echo "Examples:"
     echo "  ./llm-guard.sh start -m dev -r       # Start in dev mode with reload"
+    echo "  ./llm-guard.sh start -m docker     # Start in a Docker container"
     echo "  ./llm-guard.sh stop                  # Stop the service"
     echo "  ./llm-guard.sh status                # Show status"
     exit 1
@@ -188,6 +189,39 @@ if [[ "$ACTION" == "start" ]]; then
     done
 fi
 
+# Handle Docker execution
+if [[ "$MODE" == "docker" ]]; then
+    # Detect which Docker Compose command to use
+    if docker compose version &>/dev/null; then
+        COMPOSE_CMD="docker compose"
+    elif command -v docker-compose &>/dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        echo -e "${RED}Error: Neither 'docker compose' plugin nor 'docker-compose' is available.${NC}"
+        echo -e "${YELLOW}Please install one of them to continue.${NC}"
+        exit 1
+    fi
+
+    case "$ACTION" in
+        start)
+            echo -e "${GREEN}Starting services with '$COMPOSE_CMD'...${NC}"
+            $COMPOSE_CMD up --build -d
+            ;;
+        stop)
+            echo -e "${YELLOW}Stopping services with '$COMPOSE_CMD'...${NC}"
+            $COMPOSE_CMD down
+            ;;
+        status)
+            echo -e "${YELLOW}Checking status with '$COMPOSE_CMD'...${NC}"
+            $COMPOSE_CMD ps
+            ;;
+        *)
+            usage
+            ;;
+    esac
+    exit 0
+fi
+
 # Validate inputs (only for start)
 if [[ "$ACTION" == "start" ]]; then
     if ! [[ "$WORKERS" =~ ^[0-9]+$ ]] || [ "$WORKERS" -lt 1 ]; then
@@ -238,10 +272,9 @@ if [[ "$ACTION" == "start" ]]; then
             fi
             ;;
         docker)
-            echo -e "${GREEN}Starting in DOCKER mode${NC}"
-            # Docker mode - single worker, bind to 0.0.0.0
-            WORKERS="1"
-            UVICORN_CMD="$UVICORN_CMD --host 0.0.0.0"
+            # This case is now handled above by the docker-compose logic
+            echo -e "${RED}Error: Docker mode should be handled by the docker-compose logic. Exiting.${NC}"
+            exit 1
             ;;
     esac
 

@@ -14,8 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY app/ ./app/
+COPY config.yaml .
 
-# Create non-root user
+# Create log directory for the application
+RUN mkdir logs
+
+# Create non-root user and set permissions
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
